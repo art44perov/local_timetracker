@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Отслеживание времени</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container mt-4">
+    <h1>Отслеживание времени работы</h1>
+    <table class="table table-bordered mt-4">
+        <thead>
+            <tr>
+                <th>Название окна</th>
+                <th>Время начала</th>
+                <th>Время окончания</th>
+                <th>Продолжительность (сек)</th>
+                <th>Клиент</th>
+            </tr>
+        </thead>
+        <tbody id="activity-data">
+        </tbody>
+    </table>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        fetch("/data")
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById("activity-data");
+                tbody.innerHTML = "";
+                data.forEach(row => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td>${row[1]}</td>
+                        <td>${row[2]}</td>
+                        <td>${row[3]}</td>
+                        <td>${row[4]}</td>
+                        <td>${row[5] || ''}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            });
+    });
+</script>
+</body>
+</html>
