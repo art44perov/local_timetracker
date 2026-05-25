@@ -2,46 +2,125 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Отслеживание времени</title>
+    <title>Трекер времени клиента</title>
+    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/css/bootstrap.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.2.1/chart.min.js"></script>
 </head>
 <body>
 <div class="container mt-4">
-    <h1>Отслеживание времени работы</h1>
+    <h1 class="text-center my-3 text-primary">Трекер времени клиента</h1>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addClientModal">Добавить клиента</button>
+        <div>
+            <button class="btn btn-outline-primary" onclick="loadData()">Обновить данные</button>
+        </div>
+    </div>
     <table class="table table-bordered mt-4">
-        <thead>
+        <thead class="table-primary">
             <tr>
                 <th>Название окна</th>
                 <th>Время начала</th>
                 <th>Время окончания</th>
-                <th>Продолжительность (сек)</th>
+                <th>Продолжительность (мин)</th>
                 <th>Клиент</th>
             </tr>
         </thead>
-        <tbody id="activity-data">
+        <tbody id="activity-table">
         </tbody>
     </table>
+
+    <!-- Canvas для графика -->
+    <canvas id="timeChart" class="mt-5"></canvas>
 </div>
 
+<!-- Модальное окно для добавления клиента -->
+<div class="modal fade" id="addClientModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Добавить нового клиента</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <form id="clientForm">
+                    <div class="mb-3">
+                        <label for="clientName" class="form-label">Имя клиента:</label>
+                        <input type="text" class="form-control" id="clientName" placeholder="Введите имя клиента" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                <button type="button" class="btn btn-primary" onclick="addClient()">Добавить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/js/bootstrap.bundle.min.js"></script>
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
-        fetch("/data")
+    // Загрузка данных активности
+    function loadData() {
+        fetch('/data')
             .then(response => response.json())
             .then(data => {
-                const tbody = document.getElementById("activity-data");
-                tbody.innerHTML = "";
+                const tbody = document.getElementById('activity-table');
+                tbody.innerHTML = '';
                 data.forEach(row => {
-                    const tr = document.createElement("tr");
+                    const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${row[1]}</td>
                         <td>${row[2]}</td>
                         <td>${row[3]}</td>
-                        <td>${row[4]}</td>
+                        <td>${(row[4] / 60).toFixed(2)}</td>
                         <td>${row[5] || ''}</td>
                     `;
                     tbody.appendChild(tr);
                 });
+                renderChart(data);
             });
+    }
+
+    // График времени по активным клиентам
+    function renderChart(data) {
+        const ctx = document.getElementById('timeChart').getContext('2d');
+        const groupedData = {};
+        data.forEach(row => {
+            const client = row[5] || 'Не указан';
+            groupedData[client] = (groupedData[client] || 0) + row[4] / 60;
+        });
+        const labels = Object.keys(groupedData);
+        const values = Object.values(groupedData);
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Время (минуты)',
+                    data: values,
+                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                }]
+            }
+        });
+    }
+
+    // Добавление клиента
+    function addClient() {
+        const clientName = document.getElementById('clientName').value;
+        if (clientName) {
+            alert('Добавлен клиент: ' + clientName);
+            document.getElementById('clientForm').reset();
+        } else {
+            alert('Введите имя клиента');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadData();
     });
 </script>
 </body>
