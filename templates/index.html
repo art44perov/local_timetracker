@@ -1,127 +1,160 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Трекер времени клиента</title>
-    <!-- Bootstrap CSS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Tracker Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/css/bootstrap.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.2.1/chart.min.js"></script>
-</head>
-<body>
-<div class="container mt-4">
-    <h1 class="text-center my-3 text-primary">Трекер времени клиента</h1>
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addClientModal">Добавить клиента</button>
-        <div>
-            <button class="btn btn-outline-primary" onclick="loadData()">Обновить данные</button>
-        </div>
-    </div>
-    <table class="table table-bordered mt-4">
-        <thead class="table-primary">
-            <tr>
-                <th>Название окна</th>
-                <th>Время начала</th>
-                <th>Время окончания</th>
-                <th>Продолжительность (мин)</th>
-                <th>Клиент</th>
-            </tr>
-        </thead>
-        <tbody id="activity-table">
-        </tbody>
-    </table>
-
-    <!-- Canvas для графика -->
-    <canvas id="timeChart" class="mt-5"></canvas>
-</div>
-
-<!-- Модальное окно для добавления клиента -->
-<div class="modal fade" id="addClientModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Добавить нового клиента</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <div class="modal-body">
-                <form id="clientForm">
-                    <div class="mb-3">
-                        <label for="clientName" class="form-label">Имя клиента:</label>
-                        <input type="text" class="form-control" id="clientName" placeholder="Введите имя клиента" required>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                <button type="button" class="btn btn-primary" onclick="addClient()">Добавить</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Bootstrap JS -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/js/bootstrap.bundle.min.js"></script>
-<script>
-    // Загрузка данных активности
-    function loadData() {
-        fetch('/data')
-            .then(response => response.json())
-            .then(data => {
-                const tbody = document.getElementById('activity-table');
-                tbody.innerHTML = '';
-                data.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${row[1]}</td>
-                        <td>${row[2]}</td>
-                        <td>${row[3]}</td>
-                        <td>${(row[4] / 60).toFixed(2)}</td>
-                        <td>${row[5] || ''}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-                renderChart(data);
-            });
-    }
-
-    // График времени по активным клиентам
-    function renderChart(data) {
-        const ctx = document.getElementById('timeChart').getContext('2d');
-        const groupedData = {};
-        data.forEach(row => {
-            const client = row[5] || 'Не указан';
-            groupedData[client] = (groupedData[client] || 0) + row[4] / 60;
-        });
-        const labels = Object.keys(groupedData);
-        const values = Object.values(groupedData);
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Время (минуты)',
-                    data: values,
-                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                    borderColor: 'rgba(54, 162, 235, 1)',
-                    borderWidth: 1
-                }]
-            }
-        });
-    }
-
-    // Добавление клиента
-    function addClient() {
-        const clientName = document.getElementById('clientName').value;
-        if (clientName) {
-            alert('Добавлен клиент: ' + clientName);
-            document.getElementById('clientForm').reset();
-        } else {
-            alert('Введите имя клиента');
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
         }
-    }
 
-    document.addEventListener('DOMContentLoaded', function () {
-        loadData();
-    });
-</script>
+        .table {
+            color: #ffffff;
+        }
+
+        .bg-dark {
+            background-color: #1f1f1f !important;
+        }
+
+        .btn-primary,
+        .btn-primary:hover {
+            background-color: #6200ea;
+            border-color: #6200ea;
+        }
+
+        .card,
+        .modal-content {
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+
+        .table th {
+            color: #bb86fc;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center">Time Tracker Dashboard</h1>
+        <div class="row my-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Activity Today</h5>
+                        <p class="card-text fs-4" id="total-today">0h 0m</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Weekly Activity</h5>
+                        <p class="card-text fs-4" id="weekly-activity">0h 0m</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Time Spent</h5>
+                        <p class="card-text fs-4" id="total-time">0h 0m</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="d-flex justify-content-between mb-3">
+                    <h3>Active Sessions</h3>
+                    <button class="btn btn-primary" onclick="refreshData()">Refresh</button>
+                </div>
+                <table class="table table-dark table-striped">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Window Name</th>
+                            <th>Start Time</th>
+                            <th>End Time</th>
+                            <th>Duration (minutes)</th>
+                            <th>Client</th>
+                            <th>Note</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activity-table">
+                        <!-- Data will populate here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.2.3/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function fetchData() {
+            const response = await fetch("/data");
+            const data = await response.json();
+
+            const tbody = document.getElementById("activity-table");
+            tbody.innerHTML = "";
+
+            let totalToday = 0;
+
+            data.forEach((row, index) => {
+                const duration = (row[5] || 0) / 60;
+                const today = new Date().toISOString().split("T")[0];
+                if (row[3]?.startsWith(today)) {
+                    totalToday += duration;
+                }
+
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${row[1]}</td>
+                    <td>${row[3]}</td>
+                    <td>${row[4] || "-"}</td>
+                    <td>${duration.toFixed(2)}</td>
+                    <td>${row[2] || ""}</td>
+                    <td>${row[6] || ""}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="editNote(${row[0]})">Edit</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById("total-today").innerText = `${Math.floor(totalToday / 60)}h ${Math.floor(totalToday % 60)}m`;
+        }
+
+        function refreshData() {
+            fetchData();
+        }
+
+        async function editNote(id) {
+            const note = prompt("Enter your note:");
+            if (note) {
+                await fetch("/update_note", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id, note })
+                });
+                refreshData();
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            fetchData();
+        });
+    </script>
 </body>
+
 </html>
