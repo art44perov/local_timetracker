@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkTracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:         #0d0f14;
+    --surface:    #13161e;
+    --surface2:   #1a1e2a;
+    --border:     #252a38;
+    --accent:     #5b8af5;
+    --accent2:    #38d9a9;
+    --warn:       #f59e0b;
+    --danger:     #f43f5e;
+    --text:       #e2e8f0;
+    --muted:      #64748b;
+    --mono:       'JetBrains Mono', monospace;
+    --sans:       'Manrope', sans-serif;
+    --radius:     12px;
+    --radius-sm:  8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; }
+
+  /* ── Scrollbar ─────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Layout ────────────────────────────── */
+  .shell { display: flex; height: 100vh; }
+
+  /* ── Sidebar ───────────────────────────── */
+  .sidebar {
+    width: 220px; min-width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 0;
+  }
+  .logo {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.3px; }
+  .logo-sub  { font-size: 10px; color: var(--muted); font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  .nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+  .nav-section { padding: 8px 16px 4px; font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px; cursor: pointer; border-radius: 0;
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    transition: all .15s; border: none; background: none; width: 100%; text-align: left;
+    position: relative;
+  }
+  .nav-item:hover  { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); background: rgba(91,138,245,.08); }
+  .nav-item.active::before {
+    content: ''; position: absolute; left: 0; top: 4px; bottom: 4px;
+    width: 3px; background: var(--accent); border-radius: 0 3px 3px 0;
+  }
+  .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+
+  .sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── Status bar ────────────────────────── */
+  .status-bar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px 12px;
+    font-size: 11px; font-family: var(--mono);
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 6px var(--accent2);
+    animation: pulse 2s infinite;
+  }
+  .status-dot.paused { background: var(--warn); box-shadow: 0 0 6px var(--warn); animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+  .btn-pause {
+    margin-top: 8px; width: 100%;
+    padding: 8px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font-family: var(--sans); font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all .15s;
+  }
+  .btn-pause:hover { background: var(--surface2); border-color: var(--accent); }
+
+  /* ── Content ───────────────────────────── */
+  .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+  .topbar {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface);
+  }
+  .page-title { font-size: 18px; font-weight: 800; letter-spacing: -0.4px; }
+  .page-sub   { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+  .btn {
+    padding: 8px 16px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface2);
+    color: var(--text); font-family: var(--sans); font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all .15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #4a79e4; border-color: #4a79e4; color: #fff; }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .btn-danger { border-color: var(--danger); color: var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+
+  .main { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* ── Page sections ─────────────────────── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Cards ─────────────────────────────── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 14px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* ── Stat cards ────────────────────────── */
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .stat-label { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .8px; }
+  .stat-value { font-size: 28px; font-weight: 800; letter-spacing: -1px; margin: 6px 0 2px; }
+  .stat-sub   { font-size: 11px; color: var(--muted); }
+
+  /* ── Table ─────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* ── Badge ─────────────────────────────── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .6px;
+  }
+  .badge-browser  { background: rgba(91,138,245,.15); color: #7ba3f7; }
+  .badge-rdp      { background: rgba(245,158,11,.15);  color: #fbbf24; }
+  .badge-explorer { background: rgba(56,217,169,.15);  color: #34d399; }
+  .badge-app      { background: rgba(148,163,184,.1);  color: #94a3b8; }
+
+  /* ── Client chip ───────────────────────── */
+  .client-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  }
+  .client-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ── Notes ─────────────────────────────── */
+  .note-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+    margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start;
+  }
+  .note-time {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    min-width: 70px; padding-top: 1px;
+  }
+  .note-body { flex: 1; }
+  .note-text { font-size: 13px; line-height: 1.6; }
+  .note-client { margin-top: 5px; }
+
+  /* ── Input ─────────────────────────────── */
+  input, textarea, select {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: var(--sans); font-size: 13px; padding: 9px 12px;
+    outline: none; transition: border-color .15s; width: 100%;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 80px; }
+  label { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; display: block; margin-bottom: 5px; }
+  .form-row { margin-bottom: 12px; }
+
+  /* ── Chart container ───────────────────── */
+  .chart-wrap { position: relative; height: 240px; }
+
+  /* ── Progress bar ──────────────────────── */
+  .progress { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .progress-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+
+  /* ── Modal ─────────────────────────────── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; width: 440px; max-width: 90vw;
+    transform: translateY(12px); transition: transform .2s;
+  }
+  .overlay.open .modal { transform: none; }
+  .modal-title { font-size: 16px; font-weight: 800; margin-bottom: 18px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+  /* ── Clock ─────────────────────────────── */
+  .live-clock {
+    font-family: var(--mono); font-size: 13px; color: var(--muted);
+    padding: 4px 10px; background: var(--surface2); border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  /* ── Active session strip ──────────────── */
+  .active-strip {
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(91,138,245,.08); border: 1px solid rgba(91,138,245,.2);
+    border-radius: var(--radius-sm); padding: 10px 16px;
+    margin-bottom: 20px; font-size: 12px;
+  }
+  .active-strip-icon { font-size: 16px; }
+  .active-strip-label { font-weight: 700; color: var(--accent); }
+  .active-strip-title { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Quick note textarea ───────────────── */
+  .quick-note-bar {
+    display: flex; gap: 10px; align-items: flex-end;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 20px;
+  }
+  .quick-note-bar textarea { flex: 1; min-height: 56px; }
+  .quick-note-bar .qn-right { display: flex; flex-direction: column; gap: 8px; min-width: 160px; }
+
+  /* ── Date filter ───────────────────────── */
+  .date-filter {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .date-filter input { width: 140px; }
+
+  /* ── Empty state ───────────────────────── */
+  .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── Scrollable list ───────────────────── */
+  .list-scroll { max-height: 360px; overflow-y: auto; }
+
+  .flex { display: flex; }
+  .flex-center { display: flex; align-items: center; }
+  .gap-8 { gap: 8px; }
+  .gap-12 { gap: 12px; }
+  .ml-auto { margin-left: auto; }
+  .mt-4 { margin-top: 4px; }
+  .mt-12 { margin-top: 12px; }
+  .text-muted { color: var(--muted); }
+  .text-sm { font-size: 12px; }
+  .mono { font-family: var(--mono); }
+  .fw-700 { font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ═══ SIDEBAR ════════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">⏱</div>
+      <div>
+        <div class="logo-text">WorkTracker</div>
+        <div class="logo-sub">Time Intelligence</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-section">Главное</div>
+      <button class="nav-item active" onclick="goto('dashboard')">
+        <span class="icon">📊</span> Дашборд
+      </button>
+      <button class="nav-item" onclick="goto('notes')">
+        <span class="icon">📝</span> Заметки
+      </button>
+      <button class="nav-item" onclick="goto('history')">
+        <span class="icon">📋</span> История
+      </button>
+      <button class="nav-item" onclick="goto('report')">
+        <span class="icon">📈</span> Отчёты
+      </button>
+
+      <div class="nav-section" style="margin-top:8px">Настройки</div>
+      <button class="nav-item" onclick="goto('clients')">
+        <span class="icon">👥</span> Клиенты
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-bar">
+        <div class="status-dot" id="statusDot"></div>
+        <div id="statusText" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Трекинг активен</div>
+      </div>
+      <button class="btn-pause" id="pauseBtn" onclick="togglePause()">⏸ Пауза</button>
+    </div>
+  </aside>
+
+  <!-- ═══ CONTENT ════════════════════════════════════════════════════════ -->
+  <div class="content">
+
+    <!-- TopBar -->
+    <div class="topbar">
+      <div>
+        <div class="page-title" id="pageTitle">Дашборд</div>
+        <div class="page-sub" id="pageSub">Текущая активность и сводка за сегодня</div>
+      </div>
+      <div class="topbar-right">
+        <select id="clientSelect" style="width:160px" onchange="setActiveClient(this.value)">
+          <option value="">Загрузка...</option>
+        </select>
+        <div class="live-clock" id="clock">00:00:00</div>
+      </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+
+      <!-- ─── DASHBOARD ──────────────────────────────────────────────── -->
+      <div class="page active" id="page-dashboard">
+
+        <div id="activeStrip" class="active-strip" style="display:none">
+          <span class="active-strip-icon">▶</span>
+          <span class="active-strip-label" id="activeApp">—</span>
+          <span class="active-strip-title" id="activeTitle"></span>
+          <span class="badge badge-app" id="activeCat">app</span>
+        </div>
+
+        <!-- Быстрая заметка -->
+        <div class="quick-note-bar">
+          <textarea id="quickNote" placeholder="Быстрая заметка — что сделал прямо сейчас…" onkeydown="if(event.ctrlKey&&event.key==='Enter')saveQuickNote()"></textarea>
+          <div class="qn-right">
+            <div>
+              <label>Клиент</label>
+              <select id="noteClientSel"></select>
+            </div>
+            <button class="btn btn-primary" onclick="saveQuickNote()">💬 Сохранить <span style="font-size:10px;opacity:.7">Ctrl+↵</span></button>
+          </div>
+        </div>
+
+        <!-- Stat row -->
+        <div class="grid-4" id="statsGrid"></div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <!-- По клиентам -->
+          <div class="card">
+            <div class="card-title">По клиентам — сегодня</div>
+            <div id="clientBars"></div>
+          </div>
+          <!-- По категориям -->
+          <div class="card">
+            <div class="card-title">По категориям</div>
+            <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Последние заметки -->
+        <div class="card">
+          <div class="card-title flex-center gap-8">
+            Последние заметки
+            <button class="btn btn-sm ml-auto" onclick="goto('notes')">Все →</button>
+          </div>
+          <div id="recentNotes"></div>
+        </div>
+      </div>
+
+      <!-- ─── NOTES ──────────────────────────────────────────────────── -->
+      <div class="page" id="page-notes">
+        <div class="card">
+          <div class="card-title">Добавить заметку</div>
+          <div class="grid-2">
+            <div class="form-row">
+              <label>Клиент</label>
+              <select id="noteClientFull"></select>
+            </div>
+            <div></div>
+          </div>
+          <div class="form-row">
+            <label>Текст</label>
+            <textarea id="noteText" placeholder="Опишите что было сделано…" rows="3"></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="saveNote()">💬 Добавить заметку</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title flex-center gap-8">
+            Журнал заметок
+            <div class="date-filter ml-auto">
+              <input type="date" id="noteDateFrom" onchange="loadNotes()">
+              <span class="text-muted">—</span>
+              <input type="date" id="noteDateTo" onchange="loadNotes()">
+            </div>
+          </div>
+          <div id="notesList"></div>
+        </div>
+      </div>
+
+      <!-- ─── HISTORY ────────────────────────────────────────────────── -->
+      <div class="page" id="page-history">
+        <div class="card">
+          <div class="flex-center gap-8" style="margin-bottom:14px;flex-wrap:wrap">
+            <div class="date-filter">
+              <input type="date" id="histDateFrom" onchange="loadHistory()">
+              <span class="text-muted">—</span>
+              <input type="date" id="histDateTo" onchange="loadHistory()">
+            </div>
+            <select id="histCat" style="width:140px" onchange="loadHistory()">
+              <option value="">Все категории</option>
+              <option value="browser">Браузер</option>
+              <option value="rdp">RDP</option>
+              <option value="explorer">Проводник</option>
+              <option value="app">Приложения</option>
+            </select>
+            <select id="histClient" style="width:160px" onchange="loadHistory()">
+              <option value="">Все клиенты</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Начало</th><th>Приложение</th><th>Заголовок</th>
+                  <th>Категория</th><th>Клиент</th><th>Время</th>
+                </tr>
+              </thead>
+              <tbody id="histBody"></tbody>
+            </table>
+          </div>
+          <div id="histEmpty" class="empty" style="display:none">
+            <div class="empty-icon">📋</div>
+            <div>Нет записей за выбранный период</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── REPORT ─────────────────────────────────────────────────── -->
+      <div class="page" id="page-report">
+        <div class="flex-center gap-8" style="margin-bottom:20px;flex-wrap:wrap">
+          <div class="date-filter">
+            <input type="date" id="repDateFrom" onchange="loadReport()">
+            <span class="text-muted">—</span>
+            <input type="date" id="repDateTo" onchange="loadReport()">
+          </div>
+          <button class="btn" onclick="setRepPeriod('today')">Сегодня</button>
+          <button class="btn" onclick="setRepPeriod('week')">Неделя</button>
+          <button class="btn" onclick="setRepPeriod('month')">Месяц</button>
+        </div>
+
+        <div class="grid-4" id="repStats"></div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <div class="card">
+            <div class="card-title">По клиентам</div>
+            <div class="chart-wrap"><canvas id="repClientChart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-title">По категориям</div>
+            <div class="chart-wrap"><canvas id="repCatChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Динамика по дням</div>
+          <div class="chart-wrap" style="height:200px"><canvas id="repDayChart"></canvas></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Топ приложений</div>
+            <div id="repTopApps"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Заметки за период</div>
+            <div id="repNotes" class="list-scroll"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Детализация по клиентам</div>
+          <div id="repClientTable"></div>
+        </div>
+      </div>
+
+      <!-- ─── CLIENTS ────────────────────────────────────────────────── -->
+      <div class="page" id="page-clients">
+        <div class="card">
+          <div class="card-title">Добавить клиента</div>
+          <div class="flex gap-8" style="align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
+              <label>Название</label>
+              <input type="text" id="newClientName" placeholder="Имя клиента / проекта">
+            </div>
+            <div style="flex:1;min-width:160px">
+              <label>RDP-хост <span class="text-muted" style="font-size:10px;text-transform:none;letter-spacing:0">(IP или имя хоста)</span></label>
+              <input type="text" id="newClientRdp" placeholder="192.168.1.50 или SERVER01">
+            </div>
+            <div>
+              <label>Цвет</label>
+              <input type="color" id="newClientColor" value="#4f8ef7" style="width:48px;height:40px;padding:2px">
+            </div>
+            <button class="btn btn-primary" onclick="addClient()">Добавить</button>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+            💡 Если указать RDP-хост, все сессии с этим адресом будут автоматически привязаны к клиенту
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Список клиентов</div>
+          <div id="clientList"></div>
+        </div>
+      </div>
+
+    </div><!-- /main -->
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+<!-- ── Modal ──────────────────────────────────────────────────────────── -->
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">Редактировать</div>
+    <div id="modalBody"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-primary" id="modalOk" onclick="">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════════════════════
+const API = '';
+let clients = [];
+let isPaused = false;
+let catChartInst = null, repClientChartInst = null, repCatChartInst = null, repDayChartInst = null;
+
+// ─── Clock ─────────────────────────────────────────────────────────────────
+setInterval(() => {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toTimeString().slice(0,8);
+}, 1000);
+
+// ─── Nav ───────────────────────────────────────────────────────────────────
+const PAGE_META = {
+  dashboard: { title: 'Дашборд', sub: 'Текущая активность и сводка за сегодня' },
+  notes:     { title: 'Заметки', sub: 'Журнал всего, что было сделано' },
+  history:   { title: 'История', sub: 'Подробная история активности' },
+  report:    { title: 'Отчёты & Графики', sub: 'Аналитика за произвольный период' },
+  clients:   { title: 'Клиенты', sub: 'Управление клиентами и проектами' },
+};
+
+function goto(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.textContent.trim().includes(PAGE_META[page]?.title?.slice(0,4))) n.classList.add('active');
+  });
+  const m = PAGE_META[page] || {};
+  document.getElementById('pageTitle').textContent = m.title || '';
+  document.getElementById('pageSub').textContent   = m.sub   || '';
+
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'notes')     { initDates(); loadNotes(); }
+  if (page === 'history')   { initDates(); loadHistory(); }
+  if (page === 'report')    { initReportDates(); loadReport(); }
+  if (page === 'clients')   loadClientsList();
+}
+
+// ─── Dates helpers ──────────────────────────────────────────────────────────
+function today() { return new Date().toISOString().slice(0,10); }
+function daysAgo(n) {
+  const d = new Date(); d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0,10);
+}
+function initDates() {
+  const t = today();
+  ['noteDateFrom','noteDateTo','histDateFrom','histDateTo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value) el.value = t;
+  });
+}
+function initReportDates() {
+  const t = today();
+  if (!document.getElementById('repDateFrom').value) document.getElementById('repDateFrom').value = daysAgo(6);
+  if (!document.getElementById('repDateTo').value)   document.getElementById('repDateTo').value   = t;
+}
+function setRepPeriod(p) {
+  const t = today();
+  if (p === 'today') { document.getElementById('repDateFrom').value = t; document.getElementById('repDateTo').value = t; }
+  if (p === 'week')  { document.getElementById('repDateFrom').value = daysAgo(6); document.getElementById('repDateTo').value = t; }
+  if (p === 'month') { document.getElementById('repDateFrom').value = daysAgo(29); document.getElementById('repDateTo').value = t; }
+  loadReport();
+}
+
+// ─── Utils ──────────────────────────────────────────────────────────────────
+function fmtDur(s) {
+  if (!s) return '0 сек';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  if (h) return `${h}ч ${m}м`;
+  if (m) return `${m}м ${sec}с`;
+  return `${sec}с`;
+}
+function fmtDate(str) {
+  if (!str) return '—';
+  const d = new Date(str.replace(' ','T'));
+  return d.toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function fmtTime(str) {
+  if (!str) return '—';
+  const d = new Date(str.replace(' ','T'));
+  return d.toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
+}
+function catBadge(cat) {
+  const map = { browser:'🌐 Браузер', rdp:'🖥 RDP', explorer:'📁 Проводник', app:'⚙ Приложение' };
+  return `<span class="badge badge-${cat}">${map[cat]||cat}</span>`;
+}
+function clientChip(name, color) {
+  return `<span class="client-chip" style="background:${color}22;color:${color}">
+    <span class="client-dot" style="background:${color}"></span>${name}
+  </span>`;
+}
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ─── Clients ────────────────────────────────────────────────────────────────
+async function loadClients() {
+  clients = await api('/api/clients');
+  const selectors = ['clientSelect','noteClientSel','noteClientFull','histClient','noteClientFull'];
+  selectors.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const isFilter = id === 'histClient';
+    el.innerHTML = (isFilter ? '<option value="">Все клиенты</option>' : '') +
+      clients.map(c => `<option value="${c.id}" style="color:${c.color}">${c.name}</option>`).join('');
+  });
+}
+
+function getClientById(id) {
+  return clients.find(c => c.id == id) || { name: '—', color: '#6b7280' };
+}
+
+async function setActiveClient(cid) {
+  if (!cid) return;
+  await api('/api/active-client', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ client_id: cid }) });
+}
+
+async function addClient() {
+  const name     = document.getElementById('newClientName').value.trim();
+  const color    = document.getElementById('newClientColor').value;
+  const rdp_host = document.getElementById('newClientRdp').value.trim();
+  if (!name) return;
+  await api('/api/clients', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, color, rdp_host }) });
+  document.getElementById('newClientName').value = '';
+  document.getElementById('newClientRdp').value  = '';
+  await loadClients();
+  loadClientsList();
+}
+
+async function loadClientsList() {
+  await loadClients();
+  const el = document.getElementById('clientList');
+  if (!clients.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">👥</div>Нет клиентов</div>'; return; }
+  el.innerHTML = clients.map(c => `
+    <div class="flex-center gap-8" style="padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <span class="client-dot" style="background:${c.color};width:10px;height:10px;border-radius:50%;flex-shrink:0"></span>
+      <span style="flex:1;font-weight:600">${c.name}</span>
+      ${c.rdp_host ? `<span class="badge badge-rdp" style="font-size:10px">🖥 ${c.rdp_host}</span>` : ''}
+      <span class="text-muted text-sm mono">${c.created?.slice(0,10)}</span>
+      ${c.id > 2 ? `
+        <button class="btn btn-sm" onclick="editClient(${c.id})">✏ Изм.</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteClient(${c.id})">✕</button>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+function editClient(id) {
+  const c = getClientById(id);
+  document.getElementById('modalTitle').textContent = 'Редактировать клиента';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-row"><label>Название</label><input id="ec_name" value="${c.name}"></div>
+    <div class="form-row">
+      <label>RDP-хост <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">IP или hostname сервера</span></label>
+      <input id="ec_rdp" value="${c.rdp_host||''}" placeholder="192.168.1.50 или SERVER01">
+      <div style="margin-top:5px;font-size:11px;color:var(--muted)">Все RDP-сессии с этим адресом будут привязаны к данному клиенту</div>
+    </div>
+    <div class="form-row"><label>Цвет</label><input type="color" id="ec_color" value="${c.color}" style="width:60px;height:40px;padding:2px"></div>
+  `;
+  document.getElementById('modalOk').onclick = async () => {
+    await api(`/api/clients/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name:     document.getElementById('ec_name').value,
+        color:    document.getElementById('ec_color').value,
+        rdp_host: document.getElementById('ec_rdp').value,
+      }) });
+    closeModal(); await loadClients(); loadClientsList();
+  };
+  openModal();
+}
+
+async function deleteClient(id) {
+  if (!confirm('Удалить клиента? Его записи перейдут к "Без клиента"')) return;
+  await api(`/api/clients/${id}`, { method:'DELETE' });
+  await loadClients(); loadClientsList();
+}
+
+// ─── Tracker status ──────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const s = await api('/api/tracker/status');
+    isPaused = s.paused;
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    const btn = document.getElementById('pauseBtn');
+    const strip = document.getElementById('activeStrip');
+
+    if (isPaused) {
+      dot.className = 'status-dot paused';
+      txt.textContent = 'Пауза';
+      btn.textContent = '▶ Продолжить';
+    } else {
+      dot.className = 'status-dot';
+      if (s.current_app) {
+        txt.textContent = s.current_app;
+        strip.style.display = 'flex';
+        document.getElementById('activeApp').textContent = s.current_app;
+        document.getElementById('activeTitle').textContent = s.current_title || '';
+      } else {
+        if (!s.win32_available) txt.textContent = 'Нет win32 (см. README)';
+        else txt.textContent = 'Трекинг активен';
+        strip.style.display = 'none';
+      }
+      btn.textContent = '⏸ Пауза';
+    }
+    if (s.client_id) {
+      const sel = document.getElementById('clientSelect');
+      if (sel.value != s.client_id) sel.value = s.client_id;
+    }
+  } catch(e) {}
+}
+
+async function togglePause() {
+  if (isPaused) await api('/api/tracker/resume', { method:'POST' });
+  else          await api('/api/tracker/pause',  { method:'POST' });
+  pollStatus();
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const t = today();
+  const data = await api(`/api/report?date_from=${t}&date_to=${t}`);
+
+  // Stats
+  const total = data.by_client.reduce((a,c) => a + c.total_s, 0);
+  const clientCount = data.by_client.filter(c => c.total_s > 0).length;
+  const rdp   = data.by_category.find(c => c.category === 'rdp')?.total_s || 0;
+  const browser = data.by_category.find(c => c.category === 'browser')?.total_s || 0;
+
+  document.getElementById('statsGrid').innerHTML = [
+    { label:'Всего сегодня', val: fmtDur(total), sub:'Общее рабочее время', color:'--accent' },
+    { label:'Клиентов',      val: clientCount,   sub:'Активных сегодня',    color:'--accent2' },
+    { label:'RDP-сессии',    val: fmtDur(rdp),   sub:'Удалённые столы',     color:'--warn' },
+    { label:'Браузер',       val: fmtDur(browser),sub:'Время в браузере',   color:'--muted' },
+  ].map(s => `<div class="stat">
+    <div class="stat-label">${s.label}</div>
+    <div class="stat-value" style="color:var(${s.color})">${s.val}</div>
+    <div class="stat-sub">${s.sub}</div>
+  </div>`).join('');
+
+  // Client bars
+  const bars = document.getElementById('clientBars');
+  if (!data.by_client.length) {
+    bars.innerHTML = '<div class="empty"><div class="empty-icon">⏱</div>Нет активности сегодня</div>';
+  } else {
+    bars.innerHTML = data.by_client.map(c => {
+      const pct = total ? Math.round(c.total_s / total * 100) : 0;
+      return `<div style="margin-bottom:12px">
+        <div class="flex-center gap-8">
+          ${clientChip(c.name, c.color)}
+          <span class="ml-auto mono text-sm">${fmtDur(c.total_s)}</span>
+          <span class="text-muted text-sm">${pct}%</span>
+        </div>
+        <div class="progress"><div class="progress-fill" style="width:${pct}%;background:${c.color}"></div></div>
+      </div>`;
+    }).join('');
+  }
+
+  // Donut chart
+  const catCtx = document.getElementById('catChart').getContext('2d');
+  if (catChartInst) catChartInst.destroy();
+  const catLabels = { browser:'Браузер', rdp:'RDP', explorer:'Проводник', app:'Приложения' };
+  const catColors = { browser:'#5b8af5', rdp:'#f59e0b', explorer:'#38d9a9', app:'#64748b' };
+  if (data.by_category.length) {
+    catChartInst = new Chart(catCtx, {
+      type: 'doughnut',
+      data: {
+        labels: data.by_category.map(c => catLabels[c.category] || c.category),
+        datasets: [{ data: data.by_category.map(c => c.total_s),
+          backgroundColor: data.by_category.map(c => catColors[c.category] || '#64748b'),
+          borderWidth: 0 }]
+      },
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins: { legend:{ position:'bottom', labels:{ color:'#94a3b8', font:{family:'Manrope',size:11}, boxWidth:10 }}}}
+    });
+  }
+
+  // Recent notes
+  const notes = data.notes.slice(0,5);
+  const el = document.getElementById('recentNotes');
+  if (!notes.length) {
+    el.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-icon">📝</div>Заметок сегодня нет</div>';
+  } else {
+    el.innerHTML = notes.map(n => noteCard(n)).join('');
+  }
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────────
+function noteCard(n) {
+  const c = getClientById(n.client_id);
+  const color = n.color || c.color;
+  const cname = n.client_name || c.name;
+  return `<div class="note-card">
+    <div class="note-time">${fmtTime(n.created)}<br><span class="text-muted" style="font-size:10px">${n.created?.slice(0,10)}</span></div>
+    <div class="note-body">
+      <div class="note-text">${n.text.replace(/\n/g,'<br>')}</div>
+      <div class="note-client mt-4">${clientChip(cname, color)}</div>
+    </div>
+    <button class="btn btn-sm btn-danger" onclick="deleteNote(${n.id},this)" style="flex-shrink:0">✕</button>
+  </div>`;
+}
+
+async function saveQuickNote() {
+  const text = document.getElementById('quickNote').value.trim();
+  const cid  = document.getElementById('noteClientSel').value;
+  if (!text) return;
+  await api('/api/notes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, client_id: cid }) });
+  document.getElementById('quickNote').value = '';
+  loadDashboard();
+}
+
+async function saveNote() {
+  const text = document.getElementById('noteText').value.trim();
+  const cid  = document.getElementById('noteClientFull').value;
+  if (!text) return;
+  await api('/api/notes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, client_id: cid }) });
+  document.getElementById('noteText').value = '';
+  loadNotes();
+}
+
+async function loadNotes() {
+  await loadClients();
+  const from = document.getElementById('noteDateFrom')?.value;
+  const to   = document.getElementById('noteDateTo')?.value;
+  let url = '/api/notes?';
+  if (from) url += `date_from=${from}&`;
+  if (to)   url += `date_to=${to}`;
+  const notes = await api(url);
+  const el = document.getElementById('notesList');
+  if (!notes.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📝</div>Нет заметок за выбранный период</div>';
+    return;
+  }
+  el.innerHTML = notes.map(n => noteCard(n)).join('');
+}
+
+async function deleteNote(id, btn) {
+  await api(`/api/notes/${id}`, { method:'DELETE' });
+  btn.closest('.note-card').remove();
+}
+
+// ─── History ──────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  await loadClients();
+  const from   = document.getElementById('histDateFrom').value;
+  const to     = document.getElementById('histDateTo').value;
+  const cat    = document.getElementById('histCat').value;
+  const client = document.getElementById('histClient').value;
+  let url = `/api/sessions?limit=300`;
+  if (from)   url += `&date_from=${from}`;
+  if (to)     url += `&date_to=${to}`;
+  if (cat)    url += `&category=${cat}`;
+  if (client) url += `&client_id=${client}`;
+  const rows = await api(url);
+
+  const body  = document.getElementById('histBody');
+  const empty = document.getElementById('histEmpty');
+
+  // Populate client filter
+  const hcl = document.getElementById('histClient');
+  const prev = hcl.value;
+  hcl.innerHTML = '<option value="">Все клиенты</option>' + clients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  hcl.value = prev;
+
+  if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td class="mono" style="font-size:12px">${fmtDate(r.start_time)}</td>
+      <td class="fw-700">${r.app_name}</td>
+      <td class="text-muted text-sm" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.window_title||''}">${r.window_title||'—'}</td>
+      <td>${catBadge(r.category)}</td>
+      <td>${clientChip(r.client_name, r.color)}</td>
+      <td class="mono fw-700">${fmtDur(r.duration_s)}</td>
+    </tr>
+  `).join('');
+}
+
+// ─── Report ───────────────────────────────────────────────────────────────────
+async function loadReport() {
+  const from = document.getElementById('repDateFrom').value;
+  const to   = document.getElementById('repDateTo').value;
+  if (!from || !to) return;
+  const data = await api(`/api/report?date_from=${from}&date_to=${to}`);
+
+  const total = data.by_client.reduce((a,c) => a + c.total_s, 0);
+  const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+  const avgPerDay = days ? Math.round(total / days) : 0;
+  const rdp = data.by_category.find(c => c.category === 'rdp')?.total_s || 0;
+  const uniqueClients = data.by_client.filter(c => c.total_s > 0).length;
+
+  document.getElementById('repStats').innerHTML = [
+    { label:'Итого',        val: fmtDur(total),    sub:`за ${days} дн.`,       color:'--accent' },
+    { label:'Ср. в день',   val: fmtDur(avgPerDay), sub:'Среднее рабочее время', color:'--accent2' },
+    { label:'RDP',          val: fmtDur(rdp),       sub:'Удалённые рабочие столы', color:'--warn' },
+    { label:'Клиентов',     val: uniqueClients,     sub:'Активных за период',   color:'--muted' },
+  ].map(s => `<div class="stat">
+    <div class="stat-label">${s.label}</div>
+    <div class="stat-value" style="color:var(${s.color})">${s.val}</div>
+    <div class="stat-sub">${s.sub}</div>
+  </div>`).join('');
+
+  // By client doughnut
+  const clientCtx = document.getElementById('repClientChart').getContext('2d');
+  if (repClientChartInst) repClientChartInst.destroy();
+  if (data.by_client.length) {
+    repClientChartInst = new Chart(clientCtx, {
+      type:'doughnut',
+      data: { labels: data.by_client.map(c=>c.name), datasets:[{ data: data.by_client.map(c=>c.total_s),
+        backgroundColor: data.by_client.map(c=>c.color), borderWidth:0 }] },
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'bottom', labels:{ color:'#94a3b8', font:{family:'Manrope',size:11}, boxWidth:10 }}}}
+    });
+  }
+
+  // By category doughnut
+  const catColors = { browser:'#5b8af5', rdp:'#f59e0b', explorer:'#38d9a9', app:'#64748b' };
+  const catLabels = { browser:'Браузер', rdp:'RDP', explorer:'Проводник', app:'Приложения' };
+  const catCtx = document.getElementById('repCatChart').getContext('2d');
+  if (repCatChartInst) repCatChartInst.destroy();
+  if (data.by_category.length) {
+    repCatChartInst = new Chart(catCtx, {
+      type:'doughnut',
+      data: { labels: data.by_category.map(c=>catLabels[c.category]||c.category),
+        datasets:[{ data: data.by_category.map(c=>c.total_s),
+        backgroundColor: data.by_category.map(c=>catColors[c.category]||'#64748b'), borderWidth:0 }] },
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'bottom', labels:{ color:'#94a3b8', font:{family:'Manrope',size:11}, boxWidth:10 }}}}
+    });
+  }
+
+  // By day stacked bar
+  const allDays = [...new Set(data.by_day.map(r=>r.day))].sort();
+  const clientsInPeriod = [...new Map(data.by_day.map(r=>[r.client_name, {name:r.client_name,color:r.color}])).values()];
+  const dayDatasets = clientsInPeriod.map(c => ({
+    label: c.name,
+    backgroundColor: c.color,
+    data: allDays.map(d => {
+      const r = data.by_day.find(x=>x.day===d && x.client_name===c.name);
+      return r ? Math.round(r.total_s/60) : 0;
+    })
+  }));
+  const dayCtx = document.getElementById('repDayChart').getContext('2d');
+  if (repDayChartInst) repDayChartInst.destroy();
+  repDayChartInst = new Chart(dayCtx, {
+    type:'bar',
+    data: { labels: allDays, datasets: dayDatasets },
+    options:{ responsive:true, maintainAspectRatio:false, scales:{
+      x:{ stacked:true, ticks:{ color:'#64748b', font:{family:'JetBrains Mono',size:10} }, grid:{ color:'#252a38' }},
+      y:{ stacked:true, ticks:{ color:'#64748b', callback:v=>`${v}м`, font:{family:'JetBrains Mono',size:10} }, grid:{ color:'#252a38' }}
+    }, plugins:{ legend:{ labels:{ color:'#94a3b8', font:{family:'Manrope',size:11}, boxWidth:10 }}}}
+  });
+
+  // Top apps
+  const appsEl = document.getElementById('repTopApps');
+  const maxApp = data.top_apps[0]?.total_s || 1;
+  appsEl.innerHTML = data.top_apps.map(a => {
+    const pct = Math.round(a.total_s / maxApp * 100);
+    const c = getClientById(null);
+    return `<div style="margin-bottom:10px">
+      <div class="flex-center gap-8">
+        <span class="fw-700" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.app_name}</span>
+        ${catBadge(a.category)}
+        <span class="mono text-sm ml-auto">${fmtDur(a.total_s)}</span>
+      </div>
+      <div class="flex-center gap-8 mt-4">
+        <div class="progress" style="flex:1"><div class="progress-fill" style="width:${pct}%;background:var(--accent)"></div></div>
+        <span class="text-muted text-sm" style="min-width:60px">${a.client_name}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty"><div class="empty-icon">⚙</div>Нет данных</div>';
+
+  // Notes in period
+  const notesEl = document.getElementById('repNotes');
+  if (!data.notes.length) {
+    notesEl.innerHTML = '<div class="empty"><div class="empty-icon">📝</div>Нет заметок</div>';
+  } else {
+    notesEl.innerHTML = data.notes.map(n => `
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div class="flex-center gap-8">
+          <span class="mono text-sm text-muted">${fmtDate(n.created)}</span>
+          ${clientChip(n.client_name, n.color || '#6b7280')}
+        </div>
+        <div style="margin-top:4px;font-size:13px;line-height:1.5">${n.text.replace(/\n/g,'<br>')}</div>
+      </div>
+    `).join('');
+  }
+
+  // Client table
+  const tableEl = document.getElementById('repClientTable');
+  tableEl.innerHTML = `<table>
+    <thead><tr><th>Клиент</th><th>Время</th><th>Сессий</th><th>% от итого</th><th>Заметок</th></tr></thead>
+    <tbody>
+    ${data.by_client.map(c => {
+      const pct = total ? Math.round(c.total_s/total*100) : 0;
+      const noteCount = data.notes.filter(n => n.client_id == c.id).length;
+      return `<tr>
+        <td>${clientChip(c.name, c.color)}</td>
+        <td class="mono fw-700">${fmtDur(c.total_s)}</td>
+        <td class="mono">${c.sessions}</td>
+        <td>
+          <div class="flex-center gap-8">
+            <div class="progress" style="width:80px"><div class="progress-fill" style="width:${pct}%;background:${c.color}"></div></div>
+            <span>${pct}%</span>
+          </div>
+        </td>
+        <td class="mono">${noteCount}</td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>`;
+}
+
+// ─── Modal ────────────────────────────────────────────────────────────────────
+function openModal()  { document.getElementById('overlay').classList.add('open'); }
+function closeModal() { document.getElementById('overlay').classList.remove('open'); }
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  initDates();
+  initReportDates();
+  await loadClients();
+  await pollStatus();
+  setInterval(pollStatus, 8000);
+  setInterval(() => {
+    const page = document.querySelector('.page.active')?.id;
+    if (page === 'page-dashboard') loadDashboard();
+  }, 30000);
+  loadDashboard();
+}
+
+init();
+</script>
+</body>
+</html>
