@@ -132,8 +132,19 @@ def classify_window(exe: str, title: str) -> str:
     t = (title or "").lower()
     e = (exe or "").lower()
 
-    for pat in RDP_PATTERNS:
-        if re.search(pat, t, re.I) or re.search(pat, e, re.I):
+    # RDP — сначала по exe (самый надёжный способ, не зависит от заголовка)
+    if "mstsc" in e:
+        return "rdp"
+
+    # RDP — по заголовку (fallback, если exe определить не удалось)
+    rdp_title_patterns = [
+        r"удал[её]нный рабочий стол",
+        r"удал[её]нному рабочему столу",
+        r"remote desktop connection",
+        r"remote desktop",
+    ]
+    for pat in rdp_title_patterns:
+        if re.search(pat, t, re.I):
             return "rdp"
 
     if e in BROWSER_EXES:
@@ -147,23 +158,51 @@ def classify_window(exe: str, title: str) -> str:
 
 
 def extract_rdp_client(title: str) -> str | None:
-    """Извлечь имя RDP-хоста из заголовка окна."""
-    #  ТИХОВ — 188.40.34.180:7777 — Подключение к удаленному рабочему столу
-    patterns = [
-        r"(\S+)\s*[-–]\s*remote desktop",
-        r"(\S+)\s*[-–]\s*удал[её]нный рабочий стол",
-        r"mstsc.*?(\S+)",
-    ]
-    for pat in patterns:
-        m = re.search(pat, title or "", re.I)
-        if m:
-            return m.group(1).strip()
-    # Если просто «Удалённый рабочий стол - hostname»
-    parts = re.split(r"[-–]", title or "")
+   def extract_rdp_client(title: str) -> str | None:
+    """
+    Извлечь IP/hostname RDP-сервера из заголовка окна mstsc.
+
+    Типичные форматы Windows:
+      «192.168.1.50 - Подключение к удалённому рабочему столу»
+      «SERVER01 - Подключение к удалённому рабочему столу»
+      «192.168.1.50:3389 - Remote Desktop Connection»
+      «Удалённый рабочий стол»   ← свёрнутое окно без хоста
+    """
+    title = (title or "").strip()
+
+    # Паттерн 1: HOST стоит ПЕРЕД первым «-» или «–»,
+    # а после него идёт любой вариант RDP-текста.
+    m = re.match(
+        r'^(.+?)\s*[-–]\s*'
+        r'(?:подключение\s+к\s+удал[её]нному\s+рабочему\s+столу'
+        r'|remote\s+desktop(?:\s+connection)?'
+        r'|удал[её]нный\s+рабочий\s+стол)',
+        title, re.IGNORECASE
+    )
+    if m:
+        host = m.group(1).strip()
+        if host:
+            # Убираем порт если есть (:3389)
+            host = re.sub(r':\d+$', '', host).strip()
+            return host or None
+
+    # Паттерн 2: любой IP-адрес в любом месте заголовка
+    m = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?', title)
+    if m:
+        return m.group(1)
+
+    # Паттерн 3: hostname — первое слово до пробела/дефиса,
+    # если оно не похоже на RDP-текст
+    parts = re.split(r'\s*[-–]\s*', title)
     if len(parts) >= 2:
-        candidate = parts[-1].strip()
-        if candidate:
-            return candidate
+        candidate = parts[0].strip()
+        is_rdp_text = re.search(
+            r'подключение|удал[её]нн|remote\s+desktop|рабочий\s+стол',
+            candidate, re.IGNORECASE
+        )
+        if candidate and not is_rdp_text:
+            return re.sub(r':\d+$', '', candidate).strip() or None
+
     return None
 
 
@@ -222,42 +261,48 @@ class Tracker:
     def _start_session(self, exe, title, category):
         now = datetime.now()
         with get_db() as db:
-        # Определить client_id: для RDP — сначала ищем по rdp_host, потом по имени
             client_id = self.active_client_id
+
             if category == "rdp":
                 rdp_host = extract_rdp_client(title) or "RDP"
-                # 1. Клиент с явно прописанным rdp_host
+
+                # Убираем порт для сравнения: «188.40.34.180:7777» → «188.40.34.180»
+                host_clean = re.sub(r':\d+$', '', rdp_host).strip().lower()
+
+                # 1. Ищем по rdp_host — сравниваем без порта с обеих сторон
                 row = db.execute(
-                    "SELECT id FROM clients WHERE rdp_host=?", (rdp_host,)
+                    "SELECT id FROM clients WHERE LOWER(REPLACE(rdp_host, ' ', '')) = ?",
+                    (host_clean,)
                 ).fetchone()
+
+                if not row:
+                    # 2. Клиент с именем = хост (автосозданный раньше)
+                    row = db.execute(
+                        "SELECT id FROM clients WHERE LOWER(name) = ?",
+                        (host_clean,)
+                    ).fetchone()
+
                 if row:
                     client_id = row["id"]
                 else:
-                    # 2. Клиент с именем = хост (автосозданный раньше)
-                    row = db.execute(
-                        "SELECT id FROM clients WHERE name=?", (rdp_host,)
-                    ).fetchone()
-                    if row:
-                        client_id = row["id"]
-                    else:
-                        # 3. Создать нового клиента
-                        cur2 = db.execute(
-                            "INSERT INTO clients (name, color, rdp_host) VALUES (?,?,?)",
-                            (rdp_host, "#f59e0b", rdp_host)
-                        )
-                        client_id = cur2.lastrowid
+                    # 3. Создать нового клиента
+                    cur2 = db.execute(
+                        "INSERT INTO clients (name, color, rdp_host) VALUES (?,?,?)",
+                        (rdp_host, "#f59e0b", rdp_host)
+                    )
+                    client_id = cur2.lastrowid
 
             cur = db.execute(
                 """INSERT INTO sessions
-                   (client_id, app_name, window_title, category, start_time)
-                   VALUES (?,?,?,?,?)""",
+                (client_id, app_name, window_title, category, start_time)
+                VALUES (?,?,?,?,?)""",
                 (client_id, exe, title, category,
-                 now.strftime("%Y-%m-%d %H:%M:%S"))
+                now.strftime("%Y-%m-%d %H:%M:%S"))
             )
             self.current_session_id = cur.lastrowid
-            self.current_exe        = exe
-            self.current_title      = title
-            self.session_start      = now
+            self.current_exe = exe
+            self.current_title = title
+            self.session_start = now
 
     def tick(self):
         with self._lock:
