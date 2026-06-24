@@ -49,14 +49,31 @@
     display: flex; align-items: center; gap: 10px;
   }
   .logo-icon {
-    width: 32px; height: 32px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 16px;
+    width: 36px; height: 36px;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 8px rgba(91,138,245,0.5));
   }
   .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.3px; }
   .logo-sub  { font-size: 10px; color: var(--muted); font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* author badge */
+  .author-badge {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 10px; margin-top: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 10px; font-family: var(--mono);
+    color: var(--muted); letter-spacing: 0.3px;
+    text-decoration: none;
+    transition: border-color .15s, color .15s;
+  }
+  .author-badge:hover { border-color: var(--accent); color: var(--accent); }
+  .author-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 5px var(--accent2);
+    flex-shrink: 0;
+  }
 
   .nav { flex: 1; padding: 12px 0; overflow-y: auto; }
   .nav-section { padding: 8px 16px 4px; font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
@@ -291,7 +308,31 @@
   <!-- ═══ SIDEBAR ════════════════════════════════════════════════════════ -->
   <aside class="sidebar">
     <div class="logo">
-      <div class="logo-icon">⏱</div>
+      <!-- SVG Logo -->
+      <svg class="logo-icon" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="lg1" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#5b8af5"/>
+            <stop offset="100%" stop-color="#38d9a9"/>
+          </linearGradient>
+          <linearGradient id="lg2" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#38d9a9" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#5b8af5" stop-opacity="0.6"/>
+          </linearGradient>
+        </defs>
+        <rect width="36" height="36" rx="9" fill="url(#lg1)" opacity="0.15"/>
+        <rect width="36" height="36" rx="9" fill="none" stroke="url(#lg1)" stroke-width="1.2" opacity="0.5"/>
+        <circle cx="18" cy="19" r="9" stroke="url(#lg1)" stroke-width="1.5" fill="none" opacity="0.8"/>
+        <line x1="18" y1="11.5" x2="18" y2="13" stroke="#5b8af5" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="18" y1="25" x2="18" y2="26.5" stroke="#5b8af5" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="10.5" y1="19" x2="12" y2="19" stroke="#5b8af5" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="24" y1="19" x2="25.5" y2="19" stroke="#5b8af5" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="18" y1="19" x2="18" y2="14.5" stroke="url(#lg1)" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="18" y1="19" x2="21.5" y2="20.8" stroke="#38d9a9" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="18" cy="19" r="1.4" fill="url(#lg2)"/>
+        <rect x="9" y="6" width="11" height="2.5" rx="1.25" fill="url(#lg1)" opacity="0.9"/>
+        <rect x="21" y="6" width="6" height="2.5" rx="1.25" fill="#5b8af5" opacity="0.3"/>
+      </svg>
       <div>
         <div class="logo-text">WorkTracker</div>
         <div class="logo-sub">Time Intelligence</div>
@@ -325,6 +366,10 @@
         <div id="statusText" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Трекинг активен</div>
       </div>
       <button class="btn-pause" id="pauseBtn" onclick="togglePause()">⏸ Пауза</button>
+      <div class="author-badge">
+        <span class="author-dot"></span>
+        art44.perov
+      </div>
     </div>
   </aside>
 
