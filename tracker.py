@@ -1,8 +1,7 @@
-
 #!/usr/bin/env python3
 """
 WorkTracker — отслеживание рабочего времени с веб-интерфейсом
-Требования: pip install flask psutil pywin32 (Windows)
+Требования: pip install flask psutil pywin32 pynput (Windows)
 """
 
 import json
@@ -29,19 +28,28 @@ except ImportError:
     print("[WARN] pywin32/psutil не установлен — трекинг активного окна недоступен.")
     print("       Установите: pip install pywin32 psutil")
 
+# ── Попытка импорта pynput (для отслеживания idle) ──────────────────────────
+try:
+    from pynput import mouse, keyboard
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
+    print("[WARN] pynput не установлен — idle/sleep трекинг недоступен.")
+    print("       Установите: pip install pynput")
+
 # ── Конфиг ──────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
-DB_PATH  = BASE_DIR / "worktracker.db"
+DB_PATH = BASE_DIR / "worktracker.db"
 POLL_SEC = 5          # интервал опроса активного окна (секунды)
-IDLE_SEC = 300        # 5 мин без активности → пауза сессии
+IDLE_SEC = 600        # 10 мин без активности → режим "Сон"
 
 app = Flask(__name__, static_folder=str(BASE_DIR))
 
-# ── Браузеры ────────────────────────────────────────────────────────────────
+# ── Браузеры ─────────────────────────────────────────────────────────────────
 BROWSER_EXES = {"chrome.exe", "firefox.exe", "msedge.exe", "opera.exe",
                 "brave.exe", "vivaldi.exe", "chromium.exe"}
 
-# ── RDP-паттерны ────────────────────────────────────────────────────────────
+# ── RDP-паттерны ─────────────────────────────────────────────────────────────
 RDP_PATTERNS = [
     r"mstsc",
     r"remote desktop",
@@ -49,7 +57,7 @@ RDP_PATTERNS = [
     r"удаленный рабочий стол",
 ]
 
-# ── Паттерны проводника / файловых менеджеров ───────────────────────────────
+# ── Паттерны проводника / файловых менеджеров ────────────────────────────────
 EXPLORER_PATTERNS = [
     r"explorer\.exe",
     r"проводник",
@@ -60,7 +68,7 @@ EXPLORER_PATTERNS = [
 ]
 
 # ────────────────────────────────────────────────────────────────────────────
-#  БД
+# БД
 # ────────────────────────────────────────────────────────────────────────────
 
 def get_db():
@@ -68,48 +76,45 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_db():
     with get_db() as db:
         db.executescript("""
-        CREATE TABLE IF NOT EXISTS clients (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            name     TEXT UNIQUE NOT NULL,
-            color    TEXT DEFAULT '#4f8ef7',
-            rdp_host TEXT DEFAULT NULL,
-            created  TEXT DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS sessions (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id   INTEGER REFERENCES clients(id),
-            app_name    TEXT NOT NULL,
-            window_title TEXT,
-            category    TEXT NOT NULL,   -- browser | rdp | explorer | app
-            start_time  TEXT NOT NULL,
-            end_time    TEXT,
-            duration_s  INTEGER DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS notes (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id  INTEGER REFERENCES clients(id),
-            text       TEXT NOT NULL,
-            created    TEXT DEFAULT (datetime('now','localtime'))
-        );
-
-        -- Начальные клиенты
-        INSERT OR IGNORE INTO clients (name, color) VALUES ('Без клиента', '#6b7280');
-        INSERT OR IGNORE INTO clients (name, color) VALUES ('Личное',      '#10b981');
+            CREATE TABLE IF NOT EXISTS clients (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                name    TEXT UNIQUE NOT NULL,
+                color   TEXT DEFAULT '#4f8ef7',
+                rdp_host TEXT DEFAULT NULL,
+                created TEXT DEFAULT (datetime('now','localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id    INTEGER REFERENCES clients(id),
+                app_name     TEXT NOT NULL,
+                window_title TEXT,
+                category     TEXT NOT NULL, -- browser | rdp | explorer | app | sleep
+                start_time   TEXT NOT NULL,
+                end_time     TEXT,
+                duration_s   INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS notes (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER REFERENCES clients(id),
+                text      TEXT NOT NULL,
+                created   TEXT DEFAULT (datetime('now','localtime'))
+            );
+            -- Начальные клиенты
+            INSERT OR IGNORE INTO clients (name, color) VALUES ('Без клиента', '#6b7280');
+            INSERT OR IGNORE INTO clients (name, color) VALUES ('Личное', '#10b981');
         """)
-        # Миграция: добавить колонку rdp_host если её нет (для существующих БД)
+
+    # Миграция: добавить колонку rdp_host если её нет (для существующих БД)
+    with get_db() as db:
         cols = [r[1] for r in db.execute("PRAGMA table_info(clients)").fetchall()]
         if "rdp_host" not in cols:
             db.execute("ALTER TABLE clients ADD COLUMN rdp_host TEXT DEFAULT NULL")
 
-
 # ────────────────────────────────────────────────────────────────────────────
-#  Определение активного окна
+# Определение активного окна
 # ────────────────────────────────────────────────────────────────────────────
 
 def get_active_window_info():
@@ -126,109 +131,110 @@ def get_active_window_info():
     except Exception:
         return None, None
 
-
 def classify_window(exe: str, title: str) -> str:
     """Вернуть категорию: browser | rdp | explorer | app"""
     t = (title or "").lower()
     e = (exe or "").lower()
 
-    # RDP — сначала по exe (самый надёжный способ, не зависит от заголовка)
-    if "mstsc" in e:
-        return "rdp"
-
-    # RDP — по заголовку (fallback, если exe определить не удалось)
-    rdp_title_patterns = [
-        r"удал[её]нный рабочий стол",
-        r"удал[её]нному рабочему столу",
-        r"remote desktop connection",
-        r"remote desktop",
-    ]
-    for pat in rdp_title_patterns:
-        if re.search(pat, t, re.I):
+    for pat in RDP_PATTERNS:
+        if re.search(pat, t, re.I) or re.search(pat, e, re.I):
             return "rdp"
-
     if e in BROWSER_EXES:
         return "browser"
-
     for pat in EXPLORER_PATTERNS:
         if re.search(pat, t, re.I) or re.search(pat, e, re.I):
             return "explorer"
-
     return "app"
 
-
 def extract_rdp_client(title: str) -> str | None:
-   def extract_rdp_client(title: str) -> str | None:
-    """
-    Извлечь IP/hostname RDP-сервера из заголовка окна mstsc.
-
-    Типичные форматы Windows:
-      «192.168.1.50 - Подключение к удалённому рабочему столу»
-      «SERVER01 - Подключение к удалённому рабочему столу»
-      «192.168.1.50:3389 - Remote Desktop Connection»
-      «Удалённый рабочий стол»   ← свёрнутое окно без хоста
-    """
-    title = (title or "").strip()
-
-    # Паттерн 1: HOST стоит ПЕРЕД первым «-» или «–»,
-    # а после него идёт любой вариант RDP-текста.
-    m = re.match(
-        r'^(.+?)\s*[-–]\s*'
-        r'(?:подключение\s+к\s+удал[её]нному\s+рабочему\s+столу'
-        r'|remote\s+desktop(?:\s+connection)?'
-        r'|удал[её]нный\s+рабочий\s+стол)',
-        title, re.IGNORECASE
-    )
-    if m:
-        host = m.group(1).strip()
-        if host:
-            # Убираем порт если есть (:3389)
-            host = re.sub(r':\d+$', '', host).strip()
-            return host or None
-
-    # Паттерн 2: любой IP-адрес в любом месте заголовка
-    m = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?', title)
-    if m:
-        return m.group(1)
-
-    # Паттерн 3: hostname — первое слово до пробела/дефиса,
-    # если оно не похоже на RDP-текст
-    parts = re.split(r'\s*[-–]\s*', title)
+    patterns = [
+        r"(\S+)\s*[-–]\s*remote desktop",
+        r"(\S+)\s*[-–]\s*удал[её]нный рабочий стол",
+        r"mstsc.*?(\S+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, title or "", re.I)
+        if m:
+            return m.group(1).strip()
+    parts = re.split(r"[-–]", title or "")
     if len(parts) >= 2:
-        candidate = parts[0].strip()
-        is_rdp_text = re.search(
-            r'подключение|удал[её]нн|remote\s+desktop|рабочий\s+стол',
-            candidate, re.IGNORECASE
-        )
-        if candidate and not is_rdp_text:
-            return re.sub(r':\d+$', '', candidate).strip() or None
-
+        candidate = parts[-1].strip()
+        if candidate:
+            return candidate
     return None
 
-
 def extract_browser_site(title: str) -> str:
-    """Упрощённое извлечение имени вкладки/сайта."""
-    # «Google — Mozilla Firefox» → «Google»
     for sep in [" — ", " - ", " | "]:
         if sep in (title or ""):
             return title.split(sep)[0].strip()
     return title or "Браузер"
 
+# ────────────────────────────────────────────────────────────────────────────
+# Глобальное время последней активности (обновляется из pynput-листенеров)
+# ────────────────────────────────────────────────────────────────────────────
+
+_last_input_time = time.time()
+_last_input_lock = threading.Lock()
+
+
+def _touch_activity():
+    global _last_input_time
+    with _last_input_lock:
+        _last_input_time = time.time()
+
+
+def get_idle_seconds() -> float:
+    with _last_input_lock:
+        return time.time() - _last_input_time
+
+
+def start_input_listeners():
+    """Запускает pynput-листенеры мыши и клавиатуры в фоновых демон-потоках."""
+    if not PYNPUT_AVAILABLE:
+        return
+
+    def on_move(x, y):
+        _touch_activity()
+
+    def on_click(x, y, button, pressed):
+        _touch_activity()
+
+    def on_scroll(x, y, dx, dy):
+        _touch_activity()
+
+    def on_press(key):
+        _touch_activity()
+
+    mouse_listener = mouse.Listener(
+        on_move=on_move, on_click=on_click, on_scroll=on_scroll
+    )
+    keyboard_listener = keyboard.Listener(on_press=on_press)
+
+    mouse_listener.daemon = True
+    keyboard_listener.daemon = True
+
+    mouse_listener.start()
+    keyboard_listener.start()
+
+    print("[InputListener] Отслеживание мыши и клавиатуры запущено.")
+
 
 # ────────────────────────────────────────────────────────────────────────────
-#  Трекер (фоновый поток)
+# Трекер (фоновый поток)
 # ────────────────────────────────────────────────────────────────────────────
 
 class Tracker:
     def __init__(self):
-        self.current_session_id = None
-        self.current_exe        = None
-        self.current_title      = None
-        self.session_start      = None
-        self.last_activity      = time.time()
-        self.active_client_id   = 1   # «Без клиента» по умолчанию
-        self.paused             = False
-        self._lock              = threading.Lock()
+        self.current_session_id  = None
+        self.current_exe         = None
+        self.current_title       = None
+        self.session_start       = None
+        self.active_client_id    = 1   # «Без клиента» по умолчанию
+        self.paused              = False
+        self._sleeping           = False   # True — идёт сессия "Сон"
+        self._lock               = threading.Lock()
+
+    # ── публичные методы ────────────────────────────────────────────────────
 
     def set_client(self, client_id: int):
         with self._lock:
@@ -242,6 +248,8 @@ class Tracker:
     def resume(self):
         with self._lock:
             self.paused = False
+
+    # ── внутренние методы ───────────────────────────────────────────────────
 
     def _close_current_session(self):
         if self.current_session_id is None:
@@ -258,79 +266,110 @@ class Tracker:
         self.current_title      = None
         self.session_start      = None
 
-    def _start_session(self, exe, title, category):
+    def _start_session(self, exe, title, category, client_id=None):
         now = datetime.now()
-        with get_db() as db:
-            client_id = self.active_client_id
+        cid = client_id if client_id is not None else self.active_client_id
 
+        with get_db() as db:
             if category == "rdp":
                 rdp_host = extract_rdp_client(title) or "RDP"
-
-                # Убираем порт для сравнения: «188.40.34.180:7777» → «188.40.34.180»
-                host_clean = re.sub(r':\d+$', '', rdp_host).strip().lower()
-
-                # 1. Ищем по rdp_host — сравниваем без порта с обеих сторон
                 row = db.execute(
-                    "SELECT id FROM clients WHERE LOWER(REPLACE(rdp_host, ' ', '')) = ?",
-                    (host_clean,)
+                    "SELECT id FROM clients WHERE rdp_host=?", (rdp_host,)
                 ).fetchone()
-
-                if not row:
-                    # 2. Клиент с именем = хост (автосозданный раньше)
-                    row = db.execute(
-                        "SELECT id FROM clients WHERE LOWER(name) = ?",
-                        (host_clean,)
-                    ).fetchone()
-
                 if row:
-                    client_id = row["id"]
+                    cid = row["id"]
                 else:
-                    # 3. Создать нового клиента
-                    cur2 = db.execute(
-                        "INSERT INTO clients (name, color, rdp_host) VALUES (?,?,?)",
-                        (rdp_host, "#f59e0b", rdp_host)
-                    )
-                    client_id = cur2.lastrowid
+                    row = db.execute(
+                        "SELECT id FROM clients WHERE name=?", (rdp_host,)
+                    ).fetchone()
+                    if row:
+                        cid = row["id"]
+                    else:
+                        cur2 = db.execute(
+                            "INSERT INTO clients (name, color, rdp_host) VALUES (?,?,?)",
+                            (rdp_host, "#f59e0b", rdp_host)
+                        )
+                        cid = cur2.lastrowid
 
             cur = db.execute(
                 """INSERT INTO sessions
-                (client_id, app_name, window_title, category, start_time)
-                VALUES (?,?,?,?,?)""",
-                (client_id, exe, title, category,
-                now.strftime("%Y-%m-%d %H:%M:%S"))
+                   (client_id, app_name, window_title, category, start_time)
+                   VALUES (?,?,?,?,?)""",
+                (cid, exe, title, category, now.strftime("%Y-%m-%d %H:%M:%S"))
             )
-            self.current_session_id = cur.lastrowid
-            self.current_exe = exe
-            self.current_title = title
-            self.session_start = now
+        self.current_session_id = cur.lastrowid
+        self.current_exe        = exe
+        self.current_title      = title
+        self.session_start      = now
+
+    def _start_sleep_session(self):
+        """Открыть сессию категории 'sleep' (клиент «Личное», id=2)."""
+        self._sleeping = True
+        self._start_session(
+            exe="sleep",
+            title="Нет активности",
+            category="sleep",
+            client_id=2          # «Личное»
+        )
+        print(f"[Tracker] Начало сессии 'Сон' в {datetime.now().strftime('%H:%M:%S')}")
+
+    def _stop_sleep_session(self):
+        """Закрыть сессию 'Сон' и вернуться к нормальному трекингу."""
+        self._close_current_session()
+        self._sleeping = False
+        print(f"[Tracker] Конец сессии 'Сон' в {datetime.now().strftime('%H:%M:%S')}")
+
+    # ── главный тик ─────────────────────────────────────────────────────────
 
     def tick(self):
         with self._lock:
             if self.paused:
                 return
 
-            exe, title = get_active_window_info()
+            idle = get_idle_seconds()
 
-            # Нет данных (не Windows или ошибка)
+            # ── режим сна ──────────────────────────────────────────────────
+            if self._sleeping:
+                if idle < IDLE_SEC:
+                    # Пользователь вернулся → закрыть сон, начать нормальный трек
+                    self._stop_sleep_session()
+                    # Продолжим ниже (нормальная ветка подхватит окно)
+                else:
+                    # Обновить duration текущей sleep-сессии и выйти
+                    if self.current_session_id and self.session_start:
+                        dur = int((datetime.now() - self.session_start).total_seconds())
+                        with get_db() as db:
+                            db.execute(
+                                "UPDATE sessions SET duration_s=?, end_time=? WHERE id=?",
+                                (dur, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                 self.current_session_id)
+                            )
+                    return
+
+            # ── нормальный режим ───────────────────────────────────────────
+            if idle >= IDLE_SEC:
+                # Переходим в режим сна
+                self._close_current_session()
+                self._start_sleep_session()
+                return
+
+            exe, title = get_active_window_info()
             if exe is None:
                 return
 
-            # Обновить время активности
-            self.last_activity = time.time()
-
             category = classify_window(exe, title)
 
-            # Проверить, изменилось ли окно
-            changed = (exe != self.current_exe or
-                       (category == "rdp" and title != self.current_title) or
-                       (category == "browser" and
-                        extract_browser_site(title) != extract_browser_site(self.current_title or "")))
+            changed = (
+                exe != self.current_exe or
+                (category == "rdp" and title != self.current_title) or
+                (category == "browser" and
+                 extract_browser_site(title) != extract_browser_site(self.current_title or ""))
+            )
 
             if changed:
                 self._close_current_session()
                 self._start_session(exe, title, category)
             else:
-                # Обновить duration без смены записи
                 if self.current_session_id and self.session_start:
                     dur = int((datetime.now() - self.session_start).total_seconds())
                     with get_db() as db:
@@ -352,22 +391,20 @@ class Tracker:
 tracker = Tracker()
 
 # ────────────────────────────────────────────────────────────────────────────
-#  REST API
+# REST API
 # ────────────────────────────────────────────────────────────────────────────
 
-# — Статика ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory(str(BASE_DIR), "tracker_ui.html")
 
-
 # — Клиенты ──────────────────────────────────────────────────────────────────
+
 @app.route("/api/clients", methods=["GET"])
 def list_clients():
     with get_db() as db:
         rows = db.execute("SELECT * FROM clients ORDER BY name").fetchall()
     return jsonify([dict(r) for r in rows])
-
 
 @app.route("/api/clients", methods=["POST"])
 def create_client():
@@ -383,17 +420,17 @@ def create_client():
                 "INSERT INTO clients (name, color, rdp_host) VALUES (?,?,?)",
                 (name, color, rdp_host)
             )
-            return jsonify({"id": cur.lastrowid, "name": name, "color": color, "rdp_host": rdp_host}), 201
+            return jsonify({"id": cur.lastrowid, "name": name, "color": color,
+                            "rdp_host": rdp_host}), 201
         except sqlite3.IntegrityError:
             return jsonify({"error": "already exists"}), 409
-
 
 @app.route("/api/clients/<int:cid>", methods=["PUT"])
 def update_client(cid):
     data     = request.json
     name     = data.get("name", "").strip()
     color    = data.get("color")
-    rdp_host = data.get("rdp_host")   # None = не трогать, "" = очистить
+    rdp_host = data.get("rdp_host")
     with get_db() as db:
         if name:
             db.execute("UPDATE clients SET name=? WHERE id=?", (name, cid))
@@ -404,23 +441,21 @@ def update_client(cid):
             db.execute("UPDATE clients SET rdp_host=? WHERE id=?", (val, cid))
     return jsonify({"ok": True})
 
-
 @app.route("/api/clients/<int:cid>", methods=["DELETE"])
 def delete_client(cid):
     if cid <= 2:
         return jsonify({"error": "Нельзя удалить системных клиентов"}), 400
     with get_db() as db:
         db.execute("UPDATE sessions SET client_id=1 WHERE client_id=?", (cid,))
-        db.execute("UPDATE notes SET client_id=1 WHERE client_id=?", (cid,))
+        db.execute("UPDATE notes    SET client_id=1 WHERE client_id=?", (cid,))
         db.execute("DELETE FROM clients WHERE id=?", (cid,))
     return jsonify({"ok": True})
 
+# — Активный клиент ───────────────────────────────────────────────────────────
 
-# — Активный клиент ──────────────────────────────────────────────────────────
 @app.route("/api/active-client", methods=["GET"])
 def get_active_client():
     return jsonify({"client_id": tracker.active_client_id})
-
 
 @app.route("/api/active-client", methods=["POST"])
 def set_active_client():
@@ -428,51 +463,50 @@ def set_active_client():
     tracker.set_client(int(cid))
     return jsonify({"ok": True})
 
+# — Трекер control ────────────────────────────────────────────────────────────
 
-# — Трекер control ───────────────────────────────────────────────────────────
 @app.route("/api/tracker/pause", methods=["POST"])
 def pause_tracker():
     tracker.pause()
     return jsonify({"paused": True})
-
 
 @app.route("/api/tracker/resume", methods=["POST"])
 def resume_tracker():
     tracker.resume()
     return jsonify({"paused": False})
 
-
 @app.route("/api/tracker/status", methods=["GET"])
 def tracker_status():
     return jsonify({
-        "paused":      tracker.paused,
-        "client_id":   tracker.active_client_id,
-        "current_app": tracker.current_exe,
-        "current_title": tracker.current_title,
-        "session_start": tracker.session_start.isoformat() if tracker.session_start else None,
+        "paused":          tracker.paused,
+        "sleeping":        tracker._sleeping,
+        "idle_seconds":    int(get_idle_seconds()),
+        "idle_threshold":  IDLE_SEC,
+        "client_id":       tracker.active_client_id,
+        "current_app":     tracker.current_exe,
+        "current_title":   tracker.current_title,
+        "session_start":   tracker.session_start.isoformat() if tracker.session_start else None,
         "win32_available": WIN32_AVAILABLE,
+        "pynput_available": PYNPUT_AVAILABLE,
     })
 
+# — Заметки ───────────────────────────────────────────────────────────────────
 
-# — Заметки ──────────────────────────────────────────────────────────────────
 @app.route("/api/notes", methods=["GET"])
 def list_notes():
     cid       = request.args.get("client_id")
     date_from = request.args.get("date_from")
     date_to   = request.args.get("date_to")
-    q = "SELECT n.*, c.name AS client_name, c.color FROM notes n LEFT JOIN clients c ON c.id=n.client_id WHERE 1=1"
+    q = ("SELECT n.*, c.name AS client_name, c.color "
+         "FROM notes n LEFT JOIN clients c ON c.id=n.client_id WHERE 1=1")
     params = []
-    if cid:
-        q += " AND n.client_id=?"; params.append(cid)
-    if date_from:
-        q += " AND n.created >= ?"; params.append(date_from)
-    if date_to:
-        q += " AND n.created <= ?"; params.append(date_to + " 23:59:59")
+    if cid:       q += " AND n.client_id=?";         params.append(cid)
+    if date_from: q += " AND n.created >= ?";        params.append(date_from)
+    if date_to:   q += " AND n.created <= ?";        params.append(date_to + " 23:59:59")
     q += " ORDER BY n.created DESC"
     with get_db() as db:
         rows = db.execute(q, params).fetchall()
     return jsonify([dict(r) for r in rows])
-
 
 @app.route("/api/notes", methods=["POST"])
 def create_note():
@@ -489,15 +523,14 @@ def create_note():
         )
     return jsonify({"id": cur.lastrowid, "created": now}), 201
 
-
 @app.route("/api/notes/<int:nid>", methods=["DELETE"])
 def delete_note(nid):
     with get_db() as db:
         db.execute("DELETE FROM notes WHERE id=?", (nid,))
     return jsonify({"ok": True})
 
+# — Сессии / история ──────────────────────────────────────────────────────────
 
-# — Сессии / история ─────────────────────────────────────────────────────────
 @app.route("/api/sessions", methods=["GET"])
 def list_sessions():
     cid       = request.args.get("client_id")
@@ -505,38 +538,30 @@ def list_sessions():
     date_from = request.args.get("date_from")
     date_to   = request.args.get("date_to")
     limit     = int(request.args.get("limit", 200))
-
     q = """SELECT s.*, c.name AS client_name, c.color
            FROM sessions s LEFT JOIN clients c ON c.id=s.client_id
            WHERE s.duration_s > 0"""
     params = []
-    if cid:
-        q += " AND s.client_id=?"; params.append(cid)
-    if category:
-        q += " AND s.category=?"; params.append(category)
-    if date_from:
-        q += " AND s.start_time >= ?"; params.append(date_from)
-    if date_to:
-        q += " AND s.start_time <= ?"; params.append(date_to + " 23:59:59")
+    if cid:       q += " AND s.client_id=?";  params.append(cid)
+    if category:  q += " AND s.category=?";   params.append(category)
+    if date_from: q += " AND s.start_time >= ?"; params.append(date_from)
+    if date_to:   q += " AND s.start_time <= ?"; params.append(date_to + " 23:59:59")
     q += f" ORDER BY s.start_time DESC LIMIT {limit}"
-
     with get_db() as db:
         rows = db.execute(q, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
+# — Аналитика / отчёт ──────────────────────────────────────────────────────────
 
-# — Аналитика / отчёт ────────────────────────────────────────────────────────
 @app.route("/api/report", methods=["GET"])
 def report():
     date_from = request.args.get("date_from", datetime.now().strftime("%Y-%m-%d"))
     date_to   = request.args.get("date_to",   datetime.now().strftime("%Y-%m-%d"))
-
     with get_db() as db:
-        # Итого по клиентам
         by_client = db.execute("""
             SELECT c.id, c.name, c.color,
                    SUM(s.duration_s) AS total_s,
-                   COUNT(s.id)       AS sessions
+                   COUNT(s.id) AS sessions
             FROM sessions s
             JOIN clients c ON c.id = s.client_id
             WHERE s.start_time BETWEEN ? AND ?
@@ -545,7 +570,6 @@ def report():
             ORDER BY total_s DESC
         """, (date_from, date_to + " 23:59:59")).fetchall()
 
-        # По категориям
         by_cat = db.execute("""
             SELECT category, SUM(duration_s) AS total_s
             FROM sessions
@@ -555,7 +579,6 @@ def report():
             ORDER BY total_s DESC
         """, (date_from, date_to + " 23:59:59")).fetchall()
 
-        # По дням (для графика)
         by_day = db.execute("""
             SELECT date(start_time) AS day,
                    c.name AS client_name,
@@ -569,7 +592,6 @@ def report():
             ORDER BY day
         """, (date_from, date_to + " 23:59:59")).fetchall()
 
-        # Топ-приложения
         top_apps = db.execute("""
             SELECT app_name, category, c.name AS client_name,
                    SUM(s.duration_s) AS total_s
@@ -582,7 +604,6 @@ def report():
             LIMIT 20
         """, (date_from, date_to + " 23:59:59")).fetchall()
 
-        # Заметки за период
         notes = db.execute("""
             SELECT n.*, c.name AS client_name, c.color
             FROM notes n
@@ -592,17 +613,17 @@ def report():
         """, (date_from, date_to + " 23:59:59")).fetchall()
 
     return jsonify({
-        "by_client": [dict(r) for r in by_client],
-        "by_category": [dict(r) for r in by_cat],
-        "by_day": [dict(r) for r in by_day],
-        "top_apps": [dict(r) for r in top_apps],
-        "notes": [dict(r) for r in notes],
-        "date_from": date_from,
-        "date_to": date_to,
+        "by_client":    [dict(r) for r in by_client],
+        "by_category":  [dict(r) for r in by_cat],
+        "by_day":       [dict(r) for r in by_day],
+        "top_apps":     [dict(r) for r in top_apps],
+        "notes":        [dict(r) for r in notes],
+        "date_from":    date_from,
+        "date_to":      date_to,
     })
 
+# — Ручное добавление сессии ────────────────────────────────────────────────
 
-# — Ручное добавление сессии (для тестирования без Windows) ──────────────────
 @app.route("/api/sessions/manual", methods=["POST"])
 def manual_session():
     data = request.json
@@ -622,16 +643,20 @@ def manual_session():
         ))
     return jsonify({"ok": True}), 201
 
+# ────────────────────────────────────────────────────────────────────────────
+# Точка входа
+# ────────────────────────────────────────────────────────────────────────────
 
-# ────────────────────────────────────────────────────────────────────────────
-#  Точка входа
-# ────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
     print("=" * 55)
-    print("  WorkTracker запущен")
-    print("  Откройте браузер: http://127.0.0.1:5000")
+    print(" WorkTracker запущен")
+    print(f" Idle-порог: {IDLE_SEC // 60} мин → категория 'Сон'")
+    print(" Откройте браузер: http://127.0.0.1:5000")
     print("=" * 55)
+
+    # Запуск листенеров мыши/клавиатуры
+    start_input_listeners()
 
     # Запуск фонового трекера
     t = threading.Thread(target=tracker.run, daemon=True)
